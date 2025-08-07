@@ -213,10 +213,10 @@ void initializeLedPins() {
 int getVoltage() {
   int voltage_value = analogRead(BATTERY);
   const int R1 = 10000;
-  const int R2 = 10000;
+  const int R2 = 20000;
 
   // 電圧を計算し、100倍して整数で返す
-  int voltage = (voltage_value * 3.3 / 4095.0 * (R1 + R2) / R2) * 100;
+  int voltage = (voltage_value * 9 / 4095 * (R1 + R2) / R2) * 100;
 
   return voltage;
 }
