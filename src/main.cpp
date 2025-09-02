@@ -6,6 +6,7 @@
 #include "Secret.h" // mac addressインクルード
 #include "ESPNowManager.h" // ESPNowManager.hをインクルード
 #include "Train.h" // Train.hをインクルード
+#include "BatteryLed.h" // BatteryLed.hをインクルード
 ESPNowManager espNowManager; // ESPNowManagerのインスタンスを生成
 const int IN1 = 25;
 const int IN2 = 26;
@@ -26,7 +27,7 @@ const int blueLedChannel = 6;
 
 /*関数宣言*/
 int getVoltage(); // 電源電圧を取得する
-void initializePins(); // ピンモード設定
+void initializeLedPins(); // ピンモード設定
 
 // 受信側のMACアドレスを設定
 uint8_t receiver_mac[] = {MAC_ADDRESS_BYTE[0], MAC_ADDRESS_BYTE[1], MAC_ADDRESS_BYTE[2], MAC_ADDRESS_BYTE[3], MAC_ADDRESS_BYTE[4], MAC_ADDRESS_BYTE[5]};
@@ -67,6 +68,7 @@ void setup() {
   Serial.begin(115200); // シリアル通信を開始
   delay(1000); // シリアルが安定するまで待機
   Serial.println("setup");
+  initializeLedPins();
   WiFi.mode(WIFI_STA); // ステーションモードに設定通信相手はアクセスポイント兼ステーションモード
   WiFi.disconnect(); // 既存の接続をクリア
   delay(100);
@@ -87,6 +89,7 @@ void setup() {
   }
   
 Train train(IN1, IN2, IN3, IN4, BUZZER, motorChannel1, motorChannel2, motorChannel3, motorChannel4, buzzerChannel); // Trainのインスタンスを生成
+BatteryLed batteryLed(redLedChannel, 250, 230); // BatteryLedのインスタンスを生成
 // 送信するデータの構造体を生成
 SaneDataPacket sendData;
 int battery_value = 0; // BUTTRY電圧確認用
@@ -95,6 +98,8 @@ const int interval_1 = 20; // 待機時間（ミリ秒）
 int switchCount = -1; // スイッチのカウント
 int firstStep = 0; // 最初のステップ
 int lostCount = 0; // 通信が途切れたかどうか
+unsigned long ledBlinkMillis = 0; // LED点滅用のタイマー
+bool ledState = false; // LEDの状態
 
 // ---------------------------------------------------------------------------------------------
 
@@ -103,8 +108,23 @@ void loop() {
   // 一定時間ごとに実行する処理
   if (currentMillis - previousMillis >= interval_1) {
     previousMillis = currentMillis; // 前回の時間を更新
-    battery_value = getVoltage(); // 電源電圧を取得
-    // Serial.print(battery_value);
+    battery_value = getVoltage(); // 電源電圧を取得します。
+
+    // 通信状態でLEDを制御
+    bool isWaiting = !espNowManager.isPaired || lostCount > 10;
+    if (isWaiting) {
+      // 通信待機中は0.5秒ごとに点滅
+      if (currentMillis - ledBlinkMillis >= 500) {
+        ledBlinkMillis = currentMillis;
+        ledState = !ledState;
+        ledcWrite(blueLedChannel, ledState ? 255 : 0);
+      }
+    } else {
+      // 通信成功時は点灯
+      ledcWrite(blueLedChannel, 255);
+      ledState = true;
+    }
+
     /*↓ここからメイン処理↓*/
     if (espNowManager.isPaired) {
       // 送信データを設定(↓サンプル、他に送りたいデータがあれば変更、追加する)
@@ -125,26 +145,31 @@ void loop() {
       }else if (receivedData.sld_sw1_1 == 0) {
         train.backward(receivedData.slideVal1);
       }
-      /* ライト操作*/
-      if (receivedData.sld_sw2_2 == 1 && receivedData.sld_sw2_1 == 1) {
-        train.lightOn(100);
-      } else if (receivedData.sld_sw2_2 == 0) {
-        // 起動時にライトを消灯させる
-        if (firstStep == 0) {
-          train.lightOff();
-          // firstStep = 1;
-        } else if (firstStep == 1) {
-          if (receivedData.sw2 == 1) {
+      // バッテリー低下時のLED処理
+      Serial.print("Battery: ");
+      Serial.println(battery_value);
+      if (!batteryLed.update(battery_value)) {
+        /* ライト操作*/
+        if (receivedData.sld_sw2_2 == 1 && receivedData.sld_sw2_1 == 1) {
+          train.lightOn(100);
+        } else if (receivedData.sld_sw2_2 == 0) {
+          // 起動時にライトを消灯させる
+          if (firstStep == 0) {
+            train.lightOff();
+            // firstStep = 1;
+          } else if (firstStep == 1) {
+            if (receivedData.sw2 == 1) {
+              train.lightOn(255);
+            } else if (receivedData.sw2 == 0) {
+              train.lightOff();
+            }
+          }
+        } else if (receivedData.sld_sw2_1 == 0) {
+          if (receivedData.sw2 == 0) {
             train.lightOn(255);
-          } else if (receivedData.sw2 == 0) {
+          } else if (receivedData.sw2 == 1) {
             train.lightOff();
           }
-        }
-      } else if (receivedData.sld_sw2_1 == 0) {
-        if (receivedData.sw2 == 0) {
-          train.lightOn(255);
-        } else if (receivedData.sw2 == 1) {
-          train.lightOff();
         }
       }
       /* ブザー操作*/
@@ -209,14 +234,14 @@ void initializeLedPins() {
   ledcAttachPin(BLUE_LED, 6);
 }
 
-// 電源電圧を取得する関数
+// 電源電圧を取得する関数です。
 int getVoltage() {
   int voltage_value = analogRead(BATTERY);
-  const int R1 = 10000;
-  const int R2 = 10000;
 
-  // 電圧を計算し、100倍して整数で返す
-  int voltage = (voltage_value * 3.3 / 4095.0 * (R1 + R2) / R2) * 100;
+  // ADCの読み取り値を電圧に変換し、100倍して整数で返します。
+  int voltage = (voltage_value * 3.3 / 4095.0) * 100;
+  // テストコード
+  // voltage = 240;
 
   return voltage;
 }

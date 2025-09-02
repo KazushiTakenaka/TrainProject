@@ -5,3 +5,6 @@
 .vscode/ipch
 src/Secret.cpp
 src/Secret.h
+# Ignore user-specific files
+pronpt.txt
+.DS_Store

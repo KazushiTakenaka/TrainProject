@@ -14,7 +14,7 @@ public:
     bool isPaired;
 
 private:
-    uint8_t sender_mac[6]; // 送信側ESP32-AのMACアドレスを保存
+    uint8_t sender_mac[6]; // 送信側ESP32-AのMACアドレスを保存します。
 };
 
 #endif // ESPNOWMANAGER_H
