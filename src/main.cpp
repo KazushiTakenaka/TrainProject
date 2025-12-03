@@ -20,6 +20,12 @@ const int BATTERY = 35;     // バッテリー電圧測定用ピン (アナロ�
 const int WHITE_LED = 17;   // 白色LED用ピン
 const int BLUE_LED = 18;    // 青色LED用ピン
 
+// --- グローバル定数 ---
+const int BATTERY_LOW_THRESHOLD = 330; // バッテリー低下と判断する電圧閾値 (mV * 10)
+const int PAIRING_LED_BRIGHTNESS = 50;   // ペアリング中に点灯する青色LEDの明るさ
+const int COMMUNICATION_LOST_THRESHOLD = 10; // 通信ロストと判断するカウント数の閾値
+
+
 // --- LEDCチャンネル定義 (PWM制御用) ---
 const int motorChannel1 = 0; // モーター1用LEDCチャンネル
 const int motorChannel2 = 1; // モーター1用LEDCチャンネル
@@ -32,6 +38,12 @@ const int blueLedChannel = 6;// 青色LED用LEDCチャンネル
 /*関数宣言*/
 int getVoltage(); // 電源電圧を取得する
 void initializeLedPins(); // ピンモード設定
+void handleBattery();
+void sendEspNowData();
+void handleMotorControl(const ReceivedDataPacket& data);
+void handleLightControl(const ReceivedDataPacket& data);
+void handleBuzzerControl(const ReceivedDataPacket& data);
+void handleCommunicationStatus();
 
 // 受信側のMACアドレスを設定
 uint8_t receiver_mac[] = {MAC_ADDRESS_BYTE[0], MAC_ADDRESS_BYTE[1], MAC_ADDRESS_BYTE[2], MAC_ADDRESS_BYTE[3], MAC_ADDRESS_BYTE[4], MAC_ADDRESS_BYTE[5]};
@@ -96,67 +108,108 @@ bool ledState = false; // LEDの状態
 void loop() {
   unsigned long currentMillis = millis(); // 現在の時間を取得
   // 一定時間ごとに実行する処理
-  if (currentMillis - previousMillis >= interval_1) {
-    previousMillis = currentMillis; // 前回の時間を更新
-    battery_value = getVoltage(); // 電源電圧を取得します。
-    if (battery_value < 330) {
-      // バッテリー電圧が300mV未満の場合、白色LEDを点灯して警告します
-      ledcWrite(whiteLedChannel, 100); // 白色LEDを最大輝度で点灯
-    } else {
-      ledcWrite(whiteLedChannel, 0); // 白色LEDを消灯
-    }
+  if (currentMillis - previousMillis < interval_1) {
+    return; // インターバルに達していなければ何もしない
+  }
+  previousMillis = currentMillis;
 
-    /*↓ここからメイン処理↓*/
-    if (espNowManager.isPaired) {
-      ledcWrite(blueLedChannel, 50); // ペアリング中は点灯
-      // 送信データを設定(↓サンプル、他に送りたいデータがあれば変更、追加する)
-      sendData.val1 = 1;sendData.val2 = 2;sendData.val3 = 3;sendData.val4 = 4;sendData.val5 = 5;
-      esp_err_t result = esp_now_send(receiver_mac, (uint8_t *)&sendData, sizeof(sendData)); // データ送信
-      if (result == ESP_OK) {
-        // Serial.println("送信成功");
-      } else {
-        Serial.print("送信エラー: ");
-        Serial.println(result);
-      }
-      beforeReceiveData = receivedData; // 受信データをバックアップ
-      /*モータ出力操作、前進後進切替*/
-      if (receivedData.sld_sw1_1 == 1 && receivedData.sld_sw1_2 == 1) {
-        train.stop();
-      }else if (receivedData.sld_sw1_2 == 0) {
-        train.forward(receivedData.slideVal1);
-      }else if (receivedData.sld_sw1_1 == 0) {
-        train.backward(receivedData.slideVal1);
-      }
-      /*ライト操作*/
-      if (receivedData.sw2 == 0 && receivedData.sld_sw2_1 == 0) {
-        train.lightOn(255);
-      } else if (receivedData.sw2 == 1 && receivedData.sld_sw2_1 == 0) {
-        train.lightOff();
-      } else if (receivedData.sw2 == 0 && receivedData.sld_sw2_2 == 0) {
-        train.lightOff();
-      } else if (receivedData.sw2 == 1 && receivedData.sld_sw2_2 == 0) {
-        train.lightOn(255);
-      } else if (receivedData.sld_sw2_2 == 1 && receivedData.sld_sw2_1 == 1){
-        train.lightOn(receivedData.slideVal2);
-      } else {
-        train.lightOff();
-      }
-      
-      /* ブザー操作*/
-      if (receivedData.sw1 == 0) {
-        if (firstStep == 0) {
-          train.buzzerOff();
-          firstStep = 1;
-        } else if (firstStep == 1) {
-          train.buzzerOn();
-        }
-      } else if (receivedData.sw1 == 1) {
-        train.buzzerOff();
-      }
-    } else {
+  handleBattery();
+
+  if (espNowManager.isPaired) {
+    ledcWrite(blueLedChannel, PAIRING_LED_BRIGHTNESS);
+    sendEspNowData();
+    beforeReceiveData = receivedData; // 受信データをバックアップ
+
+    handleMotorControl(receivedData);
+    handleLightControl(receivedData);
+    handleBuzzerControl(receivedData);
+  } else {
     Serial.println("ペアリングされていないため送信できません");
   }
   
+  handleCommunicationStatus();
+}
+
+/*関数*/
+
+// バッテリー電圧をチェックし、警告LEDを制御する
+void handleBattery() {
+  battery_value = getVoltage();
+  if (battery_value < BATTERY_LOW_THRESHOLD) {
+    // バッテリー電圧が閾値未満の場合、白色LEDを点灯して警告します
+    ledcWrite(whiteLedChannel, 100); // 白色LEDを最大輝度で点灯
+  } else {
+    ledcWrite(whiteLedChannel, 0); // 白色LEDを消灯
+  }
+}
+
+// ESP-NOWでデータを送信する
+void sendEspNowData() {
+  // 送信データを設定(↓サンプル、他に送りたいデータがあれば変更、追加する)
+  sendData.val1 = 1;sendData.val2 = 2;sendData.val3 = 3;sendData.val4 = 4;sendData.val5 = 5;
+  esp_err_t result = esp_now_send(receiver_mac, (uint8_t *)&sendData, sizeof(sendData)); // データ送信
+  if (result != ESP_OK) {
+    Serial.print("送信エラー: ");
+    Serial.println(result);
+  }
+}
+
+// モーターの制御を行う
+void handleMotorControl(const ReceivedDataPacket& data) {
+  /*モータ出力操作、前進後進切替*/
+  if (data.sld_sw1_1 == 1 && data.sld_sw1_2 == 1) {
+    train.stop();
+  } else if (data.sld_sw1_2 == 0) {
+    train.forward(data.slideVal1);
+  } else if (data.sld_sw1_1 == 0) {
+    train.backward(data.slideVal1);
+  }
+}
+
+// ライトの制御を行う
+void handleLightControl(const ReceivedDataPacket& data) {
+  /*ライト操作*/
+  // スライドスイッチの状態によって動作モードを決定
+  if (data.sld_sw2_1 == 1 && data.sld_sw2_2 == 1) {
+    // モード: 中央（スライダーで調光）
+    train.lightOn(data.slideVal2);
+  } else if (data.sld_sw2_1 == 0) {
+    // モード: ポジション1
+    if (data.sw2 == 0) {
+      train.lightOn(255);
+    } else {
+      train.lightOff();
+    }
+  } else if (data.sld_sw2_2 == 0) {
+    // モード: ポジション2
+    if (data.sw2 == 1) {
+      train.lightOn(255);
+    } else {
+      train.lightOff();
+    }
+  } else {
+    // 上記のどのモードでもない場合（想定外の状態）
+    train.lightOff();
+  }
+}
+
+// ブザーの制御を行う
+void handleBuzzerControl(const ReceivedDataPacket& data) {
+  /* ブザー操作*/
+  if (data.sw1 == 0) {
+    if (firstStep == 0) {
+      train.buzzerOff();
+      firstStep = 1;
+    } else if (firstStep == 1) {
+      train.buzzerOn();
+    }
+  } else if (data.sw1 == 1) {
+    train.buzzerOff();
+  }
+}
+
+// 通信状態を監視し、状況に応じた処理を行う
+void handleCommunicationStatus() {
   if (receivedDataLength > 0) {
     # if 1
     Serial.print("受信データ: ");
@@ -183,7 +236,7 @@ void loop() {
     lostCount = 0; // 通信が途切れていないのでカウントをリセット
   } else {
     lostCount++; // 通信が途切れているのでカウントを増やす
-    if (lostCount > 10) {
+    if (lostCount > COMMUNICATION_LOST_THRESHOLD) {
       // ペアリングされていない場合の処理です (ブリージングエフェクト)
       // 2000ms (2秒)周期で明るさを計算します
       float rad = (millis() % 2000) / 2000.0 * 2.0 * PI;
@@ -197,9 +250,7 @@ void loop() {
     }
   }
 }
-}
 
-/*関数*/
 // ピンモード設定
 void initializeLedPins() {
   const int freq = 5000;
