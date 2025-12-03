@@ -6,24 +6,28 @@
 #include "Secret.h" // mac addressインクルード
 #include "ESPNowManager.h" // ESPNowManager.hをインクルード
 #include "Train.h" // Train.hをインクルード
-#include "BatteryLed.h" // BatteryLed.hをインクルード
+#include "ReceivedDataPacket.h" // ReceivedDataPacket.hをインクルード
+#include "SaneDataPacket.h" // SaneDataPacket.hをインクルード
+
 ESPNowManager espNowManager; // ESPNowManagerのインスタンスを生成
-const int IN1 = 25;
-const int IN2 = 26;
-const int IN3 = 16;
-const int IN4 = 15;
-const int BUZZER = 27;
-const int BATTERY = 35;
-const int WHITE_LED = 17;
-const int BLUE_LED = 18;
-// LEDCのチャンネル番号(0~15)
-const int motorChannel1 = 0;
-const int motorChannel2 = 1;
-const int motorChannel3 = 2;
-const int motorChannel4 = 3;
-const int buzzerChannel = 4;
-const int redLedChannel = 5;
-const int blueLedChannel = 6;
+// --- GPIOピン定義 ---
+const int IN1 = 25;         // モーター1用ピン
+const int IN2 = 26;         // モーター1用ピン
+const int IN3 = 16;         // フロントLED用ピン
+const int IN4 = 15;         // フロントLED用ピン
+const int BUZZER = 27;      // ブザー用ピン
+const int BATTERY = 35;     // バッテリー電圧測定用ピン (アナログ入力)
+const int WHITE_LED = 17;   // 白色LED用ピン
+const int BLUE_LED = 18;    // 青色LED用ピン
+
+// --- LEDCチャンネル定義 (PWM制御用) ---
+const int motorChannel1 = 0; // モーター1用LEDCチャンネル
+const int motorChannel2 = 1; // モーター1用LEDCチャンネル
+const int motorChannel3 = 2; // フロントLED用LEDCチャンネル
+const int motorChannel4 = 3; // フロントLED用LEDCチャンネル
+const int buzzerChannel = 4; // ブザー用LEDCチャンネル
+const int whiteLedChannel = 5; // 白色LED用LEDCチャンネル
+const int blueLedChannel = 6;// 青色LED用LEDCチャンネル
 
 /*関数宣言*/
 int getVoltage(); // 電源電圧を取得する
@@ -34,21 +38,8 @@ uint8_t receiver_mac[] = {MAC_ADDRESS_BYTE[0], MAC_ADDRESS_BYTE[1], MAC_ADDRESS_
 
 int receivedDataLength = 0; // 受信データの長さ
 
-// 受信データを格納する構造体
-struct ReceivedDataPacket {
-  int slideVal1;int slideVal2;
-  int sld_sw1_1;int sld_sw1_2;int sld_sw2_1;int sld_sw2_2;
-  int sld_sw3_1;int sld_sw3_2;int sld_sw4_1;int sld_sw4_2;
-  int sw1;int sw2;int sw3;int sw4;int sw5;int sw6;int sw7;int sw8;
-};
 ReceivedDataPacket receivedData; // 受信データを格納する構造体
 ReceivedDataPacket beforeReceiveData; // 前回の受信データを格納するための構造体
-
-// 送信データを格納する構造体(↓サンプル、他に送りたいデータがあれば追加する)
-// ※コントローラー側の受信するデータ構造体と同じにする
-struct SaneDataPacket {
-  int val1;int val2;int val3;int val4;int val5;
-};
 
 // データ受信時に呼び出されるコールバック関数
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
@@ -89,7 +80,6 @@ void setup() {
   }
   
 Train train(IN1, IN2, IN3, IN4, BUZZER, motorChannel1, motorChannel2, motorChannel3, motorChannel4, buzzerChannel); // Trainのインスタンスを生成
-BatteryLed batteryLed(redLedChannel, 250, 230); // BatteryLedのインスタンスを生成
 // 送信するデータの構造体を生成
 SaneDataPacket sendData;
 int battery_value = 0; // BUTTRY電圧確認用
@@ -109,24 +99,16 @@ void loop() {
   if (currentMillis - previousMillis >= interval_1) {
     previousMillis = currentMillis; // 前回の時間を更新
     battery_value = getVoltage(); // 電源電圧を取得します。
-
-    // 通信状態でLEDを制御
-    bool isWaiting = !espNowManager.isPaired || lostCount > 10;
-    if (isWaiting) {
-      // 通信待機中は0.5秒ごとに点滅
-      if (currentMillis - ledBlinkMillis >= 500) {
-        ledBlinkMillis = currentMillis;
-        ledState = !ledState;
-        ledcWrite(blueLedChannel, ledState ? 255 : 0);
-      }
+    if (battery_value < 330) {
+      // バッテリー電圧が300mV未満の場合、白色LEDを点灯して警告します
+      ledcWrite(whiteLedChannel, 100); // 白色LEDを最大輝度で点灯
     } else {
-      // 通信成功時は点灯
-      ledcWrite(blueLedChannel, 255);
-      ledState = true;
+      ledcWrite(whiteLedChannel, 0); // 白色LEDを消灯
     }
 
     /*↓ここからメイン処理↓*/
     if (espNowManager.isPaired) {
+      ledcWrite(blueLedChannel, 50); // ペアリング中は点灯
       // 送信データを設定(↓サンプル、他に送りたいデータがあれば変更、追加する)
       sendData.val1 = 1;sendData.val2 = 2;sendData.val3 = 3;sendData.val4 = 4;sendData.val5 = 5;
       esp_err_t result = esp_now_send(receiver_mac, (uint8_t *)&sendData, sizeof(sendData)); // データ送信
@@ -148,30 +130,6 @@ void loop() {
       // バッテリー低下時のLED処理
       Serial.print("Battery: ");
       Serial.println(battery_value);
-      if (!batteryLed.update(battery_value)) {
-        /* ライト操作*/
-        if (receivedData.sld_sw2_2 == 1 && receivedData.sld_sw2_1 == 1) {
-          train.lightOn(100);
-        } else if (receivedData.sld_sw2_2 == 0) {
-          // 起動時にライトを消灯させる
-          if (firstStep == 0) {
-            train.lightOff();
-            // firstStep = 1;
-          } else if (firstStep == 1) {
-            if (receivedData.sw2 == 1) {
-              train.lightOn(255);
-            } else if (receivedData.sw2 == 0) {
-              train.lightOff();
-            }
-          }
-        } else if (receivedData.sld_sw2_1 == 0) {
-          if (receivedData.sw2 == 0) {
-            train.lightOn(255);
-          } else if (receivedData.sw2 == 1) {
-            train.lightOff();
-          }
-        }
-      }
       /* ブザー操作*/
       if (receivedData.sw1 == 0) {
         if (firstStep == 0) {
@@ -214,6 +172,12 @@ void loop() {
   } else {
     lostCount++; // 通信が途切れているのでカウントを増やす
     if (lostCount > 10) {
+      // ペアリングされていない場合の処理です (ブリージングエフェクト)
+      // 2000ms (2秒)周期で明るさを計算します
+      float rad = (millis() % 2000) / 2000.0 * 2.0 * PI;
+      // sinカーブを使い、0-255の範囲で滑らかな明るさの変化を生成します
+      int brightness = (int)((sin(rad - PI / 2.0) + 1.0) / 2.0 * 255);
+      ledcWrite(blueLedChannel, brightness);
       Serial.println("通信が途切れています");
       train.stop();
       train.lightOff();
@@ -228,21 +192,26 @@ void loop() {
 void initializeLedPins() {
   const int freq = 5000;
   const int resolution = 8;
-  ledcSetup(redLedChannel, freq, resolution);
+  ledcSetup(whiteLedChannel, freq, resolution);
   ledcAttachPin(WHITE_LED, 5);
+  ledcWrite(whiteLedChannel, 0); // 初期状態は消灯
   ledcSetup(blueLedChannel, freq, resolution);
   ledcAttachPin(BLUE_LED, 6);
+  ledcWrite(blueLedChannel, 0); // 初期状態は消灯
 }
 
-// 電源電圧を取得する関数です。
 int getVoltage() {
   int voltage_value = analogRead(BATTERY);
+  // 分圧抵抗の値 (実際の回路に合わせてください)
+  const int R1 = 10000;
+  const int R2 = 20000;
 
-  // ADCの読み取り値を電圧に変換し、100倍して整数で返します。
-  int voltage = (voltage_value * 3.3 / 4095.0) * 100;
-  // テストコード
-  // voltage = 240;
+  // 電圧を計算します (ESP32のADCは3.3V基準、12bit分解能(0-4095))
+  // 計算式: Vout = Vin * R2 / (R1 + R2) -> Vin = Vout * (R1 + R2) / R2
+  // Vout = analogRead値 * 3.3 / 4095.0
+  // 注意: ESP32のADC基準電圧は内部で変動することがあるため、より正確な測定にはキャリブレーションが必要です。
+  double voltage = (voltage_value * 3.3 / 4095.0) * (double)(R1 + R2) / R2;
 
-  return voltage;
+  return (int)(voltage * 100);
 }
 

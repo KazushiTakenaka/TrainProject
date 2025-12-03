@@ -37,7 +37,7 @@ void Train::stop() {
 
 // ライトを点灯させます。
 void Train::lightOn(int light_int) {
-    ledcWrite(motorChannel3, light_int);
+    ledcWrite(motorChannel3, 0);
     ledcWrite(motorChannel4, light_int);
 }
 

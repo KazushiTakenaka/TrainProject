@@ -1,50 +1,50 @@
-# Project Overview
+# プロジェクト概要
 
-This project controls a model train using an ESP32. It uses ESP-NOW for wireless communication to receive commands and control the train's motor, lights, and buzzer.
+このプロジェクトは、ESP32を使用して模型の電車を制御します。ESP-NOWによる無線通信を利用してコマンドを受信し、電車のモーター、ライト、ブザーを制御します。
 
-## Hardware and Pinout
+## ハードウェアとピン配置
 
-Based on the `train_electric.pdf` schematic.
+回路図 `train_electric.pdf` に基づくピン配置です。
 
-| Component          | Pin (Schematic) | Pin (Code `main.cpp`) | Status      |
-| ------------------ | --------------- | --------------------- | ----------- |
-| Motor AIN1         | IO25            | `IN1 = 25`            | ✅ Match      |
-| Motor AIN2         | IO26            | `IN2 = 26`            | ✅ Match      |
-| Motor BIN1 (Light) | IO16            | `IN3 = 16`            | ✅ Match      |
-| Motor BIN2 (Light) | IO15            | `IN4 = 15`            | ✅ Match      |
-| Buzzer             | IO22            | `BUZZER = 27`         | ❌ **Mismatch** |
-| White LED          | IO21            | `WHITE_LED = 17`      | ❌ **Mismatch** |
-| Blue LED           | IO19            | `BLUE_LED = 18`       | ❌ **Mismatch** |
-| Battery Sense      | IO35            | `BATTERY = 35`        | ✅ Match      |
+| コンポーネント     | ピン (回路図) | ピン (コード `main.cpp`) | 状態     |
+| ------------------ | --------------- | ------------------------ | -------- |
+| モーター AIN1      | IO25            | `IN1 = 25`               | ✅ 一致  |
+| モーター AIN2      | IO26            | `IN2 = 26`               | ✅ 一致  |
+| モーター BIN1 (ライト) | IO16            | `IN3 = 16`               | ✅ 一致  |
+| モーター BIN2 (ライト) | IO15            | `IN4 = 15`               | ✅ 一致  |
+| ブザー             | IO27            | `BUZZER = 27`            | ✅ 一致 |
+| 白色LED            | IO17            | `WHITE_LED = 17`         | ✅ 一致 |
+| 青色LED            | IO18            | `BLUE_LED = 18`          | ✅ 一致 |
+| バッテリー検知     | IO35            | `BATTERY = 35`           | ✅ 一致  |
 
-**Note:** There are discrepancies in the pin definitions for the buzzer and LEDs between the schematic and the code. The code also uses different resistor values for voltage calculation than the schematic shows.
+**注記:** ブザーとLEDのピン定義において、回路図とコード (`main.cpp`) の間で不一致があります。具体的には、ブザー (`BUZZER = 27`、回路図ではIO22)、白色LED (`WHITE_LED = 17`、回路図ではIO21)、青色LED (`BLUE_LED = 18`、回路図ではIO19) のピン番号が異なります。また、電圧計算に使用される抵抗値も回路図とは異なります。
 
-## Function Summary
+## 機能概要
 
 ### `main.cpp`
 
-- **`setup()`**: Initializes Serial, Wi-Fi, ESP-NOW, and pairs with the controller.
-- **`loop()`**: Main operational loop. Reads battery voltage, sends data, and processes received commands to control the train. Handles communication loss.
-- **`OnDataRecv(...)`**: Callback for receiving ESP-NOW data.
-- **`OnDataSent(...)`**: Callback after sending ESP-NOW data.
-- **`getVoltage()`**: Reads and calculates the battery voltage.
-- **`initializeLedPins()`**: Configures LED pins and LEDC channels.
+- **`setup()`**: シリアル通信、Wi-Fi、ESP-NOWを初期化し、コントローラーとペアリングします。
+- **`loop()`**: メインの処理ループです。バッテリー電圧の読み取り、データ送信、受信コマンドの処理を行い、電車を制御します。通信ロスも処理します。
+- **`OnDataRecv(...)`**: ESP-NOWデータ受信時のコールバック関数です。
+- **`OnDataSent(...)`**: ESP-NOWデータ送信後のコールバック関数です。
+- **`getVoltage()`**: バッテリー電圧を読み取り、計算します。
+- **`initializeLedPins()`**: LEDピンとLEDCチャンネルを設定します。
 
-### `Train` Class (`Train.h`, `Train.cpp`)
+### `Train` クラス (`Train.h`, `Train.cpp`)
 
-- **`Train(...)`**: Constructor. Initializes pins and LEDC channels for motor, lights, and buzzer.
-- **`forward(int speed)`**: Moves the train forward.
-- **`backward(int speed)`**: Moves the train backward.
-- **`stop()`**: Stops the train.
-- **`lightOn(int brightness)`**: Turns the light on.
-- **`lightOff()`**: Turns the light off.
-- **`buzzerOn()`**: Activates the buzzer.
-- **`buzzerOff()`**: Deactivates the buzzer.
-- **`playTrainSound()`**: Plays a pre-defined train sound effect.
-- **`playSirenSound()`**: Plays a pre-defined siren sound effect.
+- **`Train(...)`**: コンストラクタ。モーター、ライト、ブザー用のピンとLEDCチャンネルを初期化します。
+- **`forward(int speed)`**: 電車を前進させます。
+- **`backward(int speed)`**: 電車を後進させます。
+- **`stop()`**: 電車を停止させます。
+- **`lightOn(int brightness)`**: ライトを点灯させます。
+- **`lightOff()`**: ライトを消灯させます。
+- **`buzzerOn()`**: ブザーを鳴らします。
+- **`buzzerOff()`**: ブザーを止めます。
+- **`playTrainSound()`**: 定義済みの電車の効果音を再生します。
+- **`playSirenSound()`**: 定義済みのサイレン音を再生します。
 
-### `ESPNowManager` Class (`ESPNowManager.h`, `ESPNowManager.cpp`)
+### `ESPNowManager` クラス (`ESPNowManager.h`, `ESPNowManager.cpp`)
 
-- **`ESPNowManager()`**: Constructor.
-- **`init()`**: Initializes the ESP-NOW service.
-- **`pairDevice(...)`**: Manages pairing with a peer device.
+- **`ESPNowManager()`**: コンストラクタ。
+- **`init()`**: ESP-NOWサービスを初期化します。
+- **`pairDevice(...)`**: ピアデバイスとのペアリングを管理します。
