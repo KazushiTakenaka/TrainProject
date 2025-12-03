@@ -127,9 +127,21 @@ void loop() {
       }else if (receivedData.sld_sw1_1 == 0) {
         train.backward(receivedData.slideVal1);
       }
-      // バッテリー低下時のLED処理
-      Serial.print("Battery: ");
-      Serial.println(battery_value);
+      /*ライト操作*/
+      if (receivedData.sw2 == 0 && receivedData.sld_sw2_1 == 0) {
+        train.lightOn(255);
+      } else if (receivedData.sw2 == 1 && receivedData.sld_sw2_1 == 0) {
+        train.lightOff();
+      } else if (receivedData.sw2 == 0 && receivedData.sld_sw2_2 == 0) {
+        train.lightOff();
+      } else if (receivedData.sw2 == 1 && receivedData.sld_sw2_2 == 0) {
+        train.lightOn(255);
+      } else if (receivedData.sld_sw2_2 == 1 && receivedData.sld_sw2_1 == 1){
+        train.lightOn(receivedData.slideVal2);
+      } else {
+        train.lightOff();
+      }
+      
       /* ブザー操作*/
       if (receivedData.sw1 == 0) {
         if (firstStep == 0) {
@@ -146,7 +158,7 @@ void loop() {
   }
   
   if (receivedDataLength > 0) {
-    # if 0
+    # if 1
     Serial.print("受信データ: ");
     Serial.print(receivedData.slideVal1);Serial.print(" ");
     Serial.print(receivedData.slideVal2);Serial.print(" ");
