@@ -137,7 +137,7 @@ void handleBattery() {
   battery_value = getVoltage();
   if (battery_value < BATTERY_LOW_THRESHOLD) {
     // バッテリー電圧が閾値未満の場合、白色LEDを点灯して警告します
-    ledcWrite(whiteLedChannel, 100); // 白色LEDを最大輝度で点灯
+    ledcWrite(whiteLedChannel, 100); // 白色LEDを点灯
   } else {
     ledcWrite(whiteLedChannel, 0); // 白色LEDを消灯
   }
